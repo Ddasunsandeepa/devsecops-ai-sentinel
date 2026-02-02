@@ -1,0 +1,26 @@
+{
+  "name": "devsecops-backend",
+  "version": "1.0.0",
+  "main": "server.ts",
+  "scripts": {
+    "dev": "ts-node --transpile-only server.ts"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "bullmq": "^4.15.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.0",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.0.0",
+    "helmet": "^7.0.0",
+    "ioredis": "^5.3.0",
+    "jsonwebtoken": "^9.0.0",
+    "pg": "^8.11.1",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.30",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.3.0"
+  }
+}
