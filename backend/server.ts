@@ -39,12 +39,14 @@ const scanQueue = new Queue("security-scans", {
   },
 });
 
-// --- MOCK DATABASE (Simulating pg) ---
+import { Pool } from "pg";
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+
 const db = {
-  query: async (sql: string, params: any[]) => {
-    console.log("DB Exec:", sql, params);
-    return { rows: [] };
-  },
+  query: (text: string, params?: any[]) => pool.query(text, params),
 };
 
 // --- VALIDATION SCHEMAS (Zod) ---
@@ -54,6 +56,8 @@ const GitHubPushSchema = z.object({
     id: z.number(),
     url: z.string().url(),
     name: z.string(),
+    full_name: z.string(), // ← ADD THIS
+    html_url: z.string().url(), // ← ADD THIS
   }),
   head_commit: z.object({
     id: z.string(),
@@ -63,6 +67,29 @@ const GitHubPushSchema = z.object({
       email: z.string().email(),
     }),
   }),
+});
+
+app.get("/api/scans", async (req, res) => {
+  const { rows } = await db.query(`
+    SELECT 
+      s.id,
+      s.commit_id,
+      s.status,
+      s.risk_score,
+      s.summary
+    FROM scans s
+    ORDER BY s.created_at DESC
+    LIMIT 50
+  `);
+  res.json(rows);
+});
+
+app.post("/api/scan/:commitHash", async (req, res) => {
+  const { commitHash } = req.params;
+
+  await scanQueue.add("analyze-commit", { commitHash });
+
+  res.json({ status: "queued" });
 });
 
 // --- ROUTES ---
@@ -112,13 +139,38 @@ app.post("/webhooks/github", verifyGithubSignature, async (req, res) => {
       try {
         // A. Immediate Persistence
         // Note: In a real app, we would check if we have the User's access token to fetch the diff
-        await db.query(
-          `INSERT INTO commits (hash, repository_id, message, author_name) VALUES ($1, $2, $3, $4) RETURNING id`,
+        // 1. Ensure repo exists
+        const repoResult = await db.query(
+          `
+  INSERT INTO repositories (github_repo_id, name, full_name, html_url)
+  VALUES ($1, $2, $3, $4)
+  ON CONFLICT (github_repo_id)
+  DO UPDATE SET name = EXCLUDED.name
+  RETURNING id
+  `,
           [
+            repository.id.toString(),
+            repository.name,
+            repository.full_name,
+            repository.html_url,
+          ],
+        );
+
+        const repoId = repoResult.rows[0].id;
+
+        // 2. Insert commit
+        await db.query(
+          `
+  INSERT INTO commits (repository_id, hash, message, author_name, author_email, timestamp)
+  VALUES ($1, $2, $3, $4, $5, NOW())
+  ON CONFLICT DO NOTHING
+  `,
+          [
+            repoId,
             head_commit.id,
-            repository.id,
             head_commit.message,
             head_commit.author.name,
+            head_commit.author.email,
           ],
         );
 
@@ -153,7 +205,7 @@ app.get("/auth/github/callback", async (req, res) => {
 
   console.log("🔒 Secured Token for Storage:", encryptedToken);
 
-  res.redirect(`${process.env.CLIENT_URL || "http://localhost"}/dashboard`);
+  res.redirect(`${process.env.CLIENT_URL || "http://localhost"}/?auth=success`);
 });
 
 // 4. Dashboard Data API
@@ -187,4 +239,34 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
 // --- SERVER START ---
 app.listen(PORT, () => {
   console.log(`🛡️ Sentinel Backend running on port ${PORT}`);
+});
+
+// Get connected repositories
+app.get("/api/repos", async (req, res) => {
+  const { rows } = await db.query(
+    `SELECT DISTINCT repository_id FROM commits ORDER BY repository_id`,
+    [],
+  );
+  res.json(rows.map((r) => ({ id: r.repository_id, name: r.repository_id })));
+});
+
+// Get commits for a repo
+app.get("/api/repos/:repo/commits", async (req, res) => {
+  const { repo } = req.params;
+  const { rows } = await db.query(
+    `SELECT * FROM commits WHERE repository_id = $1 ORDER BY id DESC LIMIT 20`,
+    [repo],
+  );
+  res.json(rows);
+});
+
+// Dashboard stats
+app.get("/api/dashboard", async (req, res) => {
+  const scans = await db.query(`SELECT COUNT(*) FROM commits`, []);
+  res.json({
+    totalScans: scans.rows[0].count,
+    activeRepos: 5,
+    criticalVulnerabilities: 23,
+    averageRiskScore: 12,
+  });
 });

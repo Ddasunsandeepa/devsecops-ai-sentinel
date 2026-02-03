@@ -6,11 +6,10 @@ import { Icons } from './Icons';
 interface SidebarProps {
   currentView: AppView;
   onChangeView: (view: AppView) => void;
-  user: User | null;
   onLogout: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, user, onLogout }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, onLogout }) => {
   const navItems = [
     { view: AppView.DASHBOARD, label: 'Analytics', icon: Icons.Dashboard },
     { view: AppView.REPOSITORIES, label: 'Repositories', icon: Icons.Repo },
